@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inuvo URL Builder</title>
+  <style>
+    :root { color-scheme: light; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 24px; }
+    .wrap { max-width: 980px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .full { grid-column: 1 / -1; }
+    label { display:block; font-size: 12px; color: #444; margin-bottom: 6px; }
+    input, textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #ddd; border-radius: 10px; outline: none; }
+    input:focus, textarea:focus { border-color: #999; }
+    textarea { min-height: 90px; resize: vertical; }
+    .row { display:flex; gap: 10px; align-items:center; }
+    button { padding: 10px 14px; border: 1px solid #ddd; border-radius: 10px; background: #fff; cursor: pointer; }
+    button:hover { border-color: #bbb; }
+    .hint { font-size: 12px; color: #666; margin-top: 6px; line-height: 1.5; }
+    .error { color: #b00020; font-size: 12px; margin-top: 6px; }
+    .ok { color: #0b7a0b; font-size: 12px; margin-top: 6px; }
+    .box { padding: 12px; border: 1px dashed #ddd; border-radius: 12px; background: #fafafa; }
+    code { word-break: break-all; }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <h1>Inuvo URL Builder（静态版）</h1>
+    <div class="hint">
+      模板（按你文档）：<br/>
+      <code>https://gomoto.co/article/00001?utm_term=00002&utm_content=00003&tkid=00004&agid=YOUR_AGID&cad_id={{ad.id}}&placement={{placement}}&fbclid={external_id}&ppxid=00005</code>
+    </div>
+
+    <div style="height:14px"></div>
+
+    <div class="grid">
+      <div class="full">
+        <label>文章链接（00001，必填）</label>
+        <input id="articleUrl" placeholder="例如：https://gomoto.co/article/12345" />
+        <div class="hint">支持直接粘贴完整文章 URL；会自动提取路径末尾的 article id。</div>
+        <div class="error" id="errArticle"></div>
+      </div>
+
+      <div class="full">
+        <label>关键词（00002，必填，建议 6 个；用换行或逗号/空格分隔都行）</label>
+        <textarea id="keywords" placeholder="例：keyword1&#10;keyword2&#10;keyword3"></textarea>
+        <div class="hint">会自动拼接成英文逗号分隔，并自动 URL 编码。</div>
+        <div class="error" id="errKeywords"></div>
+      </div>
+
+      <div class="full">
+        <label>文章标题（00003，必填）</label>
+        <input id="title" placeholder="例如：Best eBikes for Commuting" />
+        <div class="hint">会自动 URL 编码（空格、&、? 等都不会出错）。</div>
+        <div class="error" id="errTitle"></div>
+      </div>
+
+      <div>
+        <label>tkid / channel-ID（00004，必填）</label>
+        <input id="tkid" placeholder="例如：1234567890" />
+        <div class="error" id="errTkid"></div>
+      </div>
+
+      <div>
+        <label>AGID（必填，不要固定，每次投放填写）</label>
+        <input id="agid" placeholder="例如：5095519421 或其他" />
+        <div class="error" id="errAgid"></div>
+      </div>
+
+      <div>
+        <label>像素 ID ppxid（00005，必填）</label>
+        <input id="ppxid" placeholder="例如：987654321" />
+        <div class="error" id="errPpxid"></div>
+      </div>
+
+      <div>
+        <label>可选：覆盖域名/前缀</label>
+        <input id="base" value="https://gomoto.co/article/" />
+        <div class="hint">默认是 gomoto.co/article/；除非以后换域名才改。</div>
+      </div>
+
+      <div class="full">
+        <div class="row">
+          <button id="btnBuild">生成 URL</button>
+          <button id="btnCopy" disabled>复制 URL</button>
+          <button id="btnClear">清空</button>
+          <span id="status" class="hint"></span>
+        </div>
+      </div>
+
+      <div class="full box">
+        <label>生成结果</label>
+        <code id="result">（未生成）</code>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // 固定模板片段（你文档里的固定参数）
+  const FIXED_QUERY_TAIL = '&cad_id={{ad.id}}&placement={{placement}}&fbclid={external_id}';
+
+  const el = (id) => document.getElementById(id);
+
+  function setErr(id, msg) { el(id).textContent = msg || ''; }
+  function setStatus(msg, ok=false) {
+    const s = el('status');
+    s.className = ok ? 'ok' : 'hint';
+    s.textContent = msg || '';
+  }
+
+  function normalizeKeywords(raw) {
+    // 支持：换行、逗号、中文逗号、空格、分号
+    const parts = raw
+      .split(/[\n,，;；\s]+/g)
+      .map(s => s.trim())
+      .filter(Boolean);
+    // 去重但保留顺序
+    const seen = new Set();
+    const uniq = [];
+    for (const k of parts) { if (!seen.has(k)) { seen.add(k); uniq.push(k); } }
+    return uniq;
+  }
+
+  function extractArticleId(articleUrl) {
+    // 允许用户输入：
+    // 1) https://gomoto.co/article/12345
+    // 2) 12345
+    const s = articleUrl.trim();
+    if (!s) return null;
+    if (/^\d+$/.test(s)) return s;
+
+    try {
+      const u = new URL(s);
+      const m = u.pathname.match(/\/article\/([^\/?#]+)/);
+      return m ? m[1] : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function buildUrl() {
+    // 清空错误
+    ['errArticle','errKeywords','errTitle','errTkid','errAgid','errPpxid'].forEach(id => setErr(id,''));
+    setStatus('');
+
+    const base = el('base').value.trim() || 'https://gomoto.co/article/';
+    const articleInput = el('articleUrl').value;
+    const articleId = extractArticleId(articleInput);
+
+    const keywordsRaw = el('keywords').value;
+    const keywordsArr = normalizeKeywords(keywordsRaw);
+
+    const title = el('title').value.trim();
+    const tkid = el('tkid').value.trim();
+    const agid = el('agid').value.trim();
+    const ppxid = el('ppxid').value.trim();
+
+    let ok = true;
+
+    if (!articleId) { setErr('errArticle', '文章链接/ID 无法识别：请粘贴类似 https://gomoto.co/article/12345 或直接输入 12345'); ok = false; }
+    if (keywordsArr.length === 0) { setErr('errKeywords', '关键词必填'); ok = false; }
+    // 你文档说一般 6 个，这里做软提醒，不拦截
+    if (keywordsArr.length > 0 && keywordsArr.length !== 6) {
+      setStatus(`提示：当前关键词 ${keywordsArr.length} 个（一般建议 6 个）`);
+    }
+
+    if (!title) { setErr('errTitle', '文章标题必填'); ok = false; }
+    if (!tkid) { setErr('errTkid', 'tkid 必填'); ok = false; }
+    if (!agid) { setErr('errAgid', 'AGID 必填'); ok = false; }
+    if (!ppxid) { setErr('errPpxid', 'ppxid 必填'); ok = false; }
+
+    if (!ok) {
+      el('result').textContent = '（校验未通过）';
+      el('btnCopy').disabled = true;
+      return null;
+    }
+
+    const utm_term = encodeURIComponent(keywordsArr.join(','));
+    const utm_content = encodeURIComponent(title);
+
+    // articleId 不 encode（通常是数字/短串），如你们存在特殊字符可改为 encodeURIComponent(articleId)
+    const url =
+      `${base}${articleId}` +
+      `?utm_term=${utm_term}` +
+      `&utm_content=${utm_content}` +
+      `&tkid=${encodeURIComponent(tkid)}` +
+      `&agid=${encodeURIComponent(agid)}` +
+      FIXED_QUERY_TAIL +
+      `&ppxid=${encodeURIComponent(ppxid)}`;
+
+    el('result').textContent = url;
+    el('btnCopy').disabled = false;
+    setStatus('已生成 ✅', true);
+    return url;
+  }
+
+  async function copyResult() {
+    const text = el('result').textContent;
+    if (!text || text.startsWith('（')) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus('已复制到剪贴板 ✅', true);
+    } catch {
+      // 兼容极少数环境
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setStatus('已复制到剪贴板 ✅', true);
+    }
+  }
+
+  function clearAll() {
+    ['articleUrl','keywords','title','tkid','agid','ppxid'].forEach(id => el(id).value = '');
+    ['errArticle','errKeywords','errTitle','errTkid','errAgid','errPpxid'].forEach(id => setErr(id,''));
+    el('result').textContent = '（未生成）';
+    el('btnCopy').disabled = true;
+    setStatus('');
+  }
+
+  el('btnBuild').addEventListener('click', buildUrl);
+  el('btnCopy').addEventListener('click', copyResult);
+  el('btnClear').addEventListener('click', clearAll);
+</script>
+</body>
+</html>
