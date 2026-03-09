@@ -55,6 +55,11 @@
       border-color: #999;
     }
 
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+
     .row {
       display: flex;
       gap: 10px;
@@ -109,29 +114,12 @@
       line-height: 1.5;
     }
 
-    .kw-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
-    }
-
-    .kw-item small {
-      display: block;
-      margin-top: 4px;
-      color: #888;
-      font-size: 11px;
-    }
-
     code {
       word-break: break-all;
     }
 
     @media (max-width: 720px) {
       .grid {
-        grid-template-columns: 1fr;
-      }
-
-      .kw-grid {
         grid-template-columns: 1fr;
       }
     }
@@ -158,41 +146,16 @@
       </div>
 
       <div class="full">
-        <label>关键词（00002，建议填满 6 个）</label>
-        <div class="kw-grid">
-          <div class="kw-item">
-            <input id="kw1" placeholder="Keyword 1" />
-            <small>第 1 个关键词</small>
-          </div>
-          <div class="kw-item">
-            <input id="kw2" placeholder="Keyword 2" />
-            <small>第 2 个关键词</small>
-          </div>
-          <div class="kw-item">
-            <input id="kw3" placeholder="Keyword 3" />
-            <small>第 3 个关键词</small>
-          </div>
-          <div class="kw-item">
-            <input id="kw4" placeholder="Keyword 4" />
-            <small>第 4 个关键词</small>
-          </div>
-          <div class="kw-item">
-            <input id="kw5" placeholder="Keyword 5" />
-            <small>第 5 个关键词</small>
-          </div>
-          <div class="kw-item">
-            <input id="kw6" placeholder="Keyword 6" />
-            <small>第 6 个关键词</small>
-          </div>
-        </div>
-        <div class="hint">会按投放标准自动拼成：关键词1,+关键词2,+关键词3...</div>
+        <label>关键词（00002，选填）</label>
+        <textarea id="keywords" placeholder="每行输入一个关键词，例如：&#10;alzheimer's medication side effects&#10;side effects of alzheimer's medication&#10;alzheimer's stages life expectancy"></textarea>
+        <div class="hint">每行一个关键词，系统会按投放标准自动拼成：关键词1,+关键词2,+关键词3...</div>
         <div class="error" id="errKeywords"></div>
       </div>
 
       <div class="full">
-        <label>文章标题（00003，必填）</label>
+        <label>文章标题（00003，选填）</label>
         <input id="title" placeholder="例如：Alzheimer’s Disease Pain Points: Early Symptoms, Stages, Life Expectancy, and Medication Side Effects" />
-        <div class="hint">输出结果会尽量保留空格、撇号等可读样式。</div>
+        <div class="hint">可不填；输出结果会尽量保留空格、撇号等可读样式。</div>
         <div class="error" id="errTitle"></div>
       </div>
 
@@ -200,12 +163,6 @@
         <label>tkid / channel-ID（00004，必填）</label>
         <input id="tkid" placeholder="例如：online_60080" />
         <div class="error" id="errTkid"></div>
-      </div>
-
-      <div>
-        <label>AGID（必填）</label>
-        <input id="agid" placeholder="例如：5095519421" />
-        <div class="error" id="errAgid"></div>
       </div>
 
       <div>
@@ -239,6 +196,7 @@
 
   <script>
     const FIXED_QUERY_TAIL = '&cad_id={{ad.id}}&placement={{placement}}&fbclid={external_id}';
+    const FIXED_AGID = '5095519421';
 
     const el = (id) => document.getElementById(id);
 
@@ -263,7 +221,6 @@
       const raw = (articleUrlInput || '').trim();
       if (!raw) return null;
 
-      // 如果用户直接填 article 后面的 slug，也兼容
       if (!raw.includes('/') && !raw.includes('.')) {
         return raw;
       }
@@ -279,13 +236,11 @@
       }
     }
 
-    function getKeywords6() {
-      const arr = [];
-      for (let i = 1; i <= 6; i++) {
-        const value = el('kw' + i).value.trim();
-        if (value) arr.push(value);
-      }
-      return arr;
+    function getKeywordsFromTextarea() {
+      return (el('keywords').value || '')
+        .split(/\n+/)
+        .map(item => item.trim())
+        .filter(Boolean);
     }
 
     function encodeForReadableQuery(value) {
@@ -298,17 +253,16 @@
     }
 
     function buildUrl() {
-      ['errArticle','errKeywords','errTitle','errTkid','errAgid','errPpxid'].forEach(id => setErr(id, ''));
+      ['errArticle','errKeywords','errTitle','errTkid','errPpxid'].forEach(id => setErr(id, ''));
       setStatus('');
 
       const base = (el('base').value.trim() || 'https://gomoto.co/article/').replace(/\/+$/, '') + '/';
       const articleInput = el('articleUrl').value;
       const articlePath = extractArticlePath(articleInput);
 
-      const keywordsArr = getKeywords6();
+      const keywordsArr = getKeywordsFromTextarea();
       const title = el('title').value.trim();
       const tkid = el('tkid').value.trim();
-      const agid = el('agid').value.trim();
       const ppxid = el('ppxid').value.trim();
 
       let ok = true;
@@ -318,25 +272,8 @@
         ok = false;
       }
 
-      if (keywordsArr.length === 0) {
-        setErr('errKeywords', '请至少填写 1 个关键词，建议填满 6 个');
-        ok = false;
-      } else if (keywordsArr.length !== 6) {
-        setStatus(`提示：当前填写了 ${keywordsArr.length} 个关键词，建议填满 6 个`);
-      }
-
-      if (!title) {
-        setErr('errTitle', '文章标题必填');
-        ok = false;
-      }
-
       if (!tkid) {
         setErr('errTkid', 'tkid 必填');
-        ok = false;
-      }
-
-      if (!agid) {
-        setErr('errAgid', 'AGID 必填');
         ok = false;
       }
 
@@ -351,17 +288,31 @@
         return null;
       }
 
-      const utm_term = encodeForReadableQuery(keywordsArr.join(',+'));
-      const utm_content = encodeForReadableQuery(title);
+      const params = [];
+      params.push(`agid=${FIXED_AGID}`);
+      params.push(`cad_id={{ad.id}}`);
+      params.push(`placement={{placement}}`);
+      params.push(`fbclid={external_id}`);
 
-      const url =
-        `${base}${articlePath}` +
-        `?utm_term=${utm_term}` +
-        `&utm_content=${utm_content}` +
-        `&tkid=${encodeForReadableQuery(tkid)}` +
-        `&agid=${encodeForReadableQuery(agid)}` +
-        FIXED_QUERY_TAIL +
-        `&ppxid=${encodeForReadableQuery(ppxid)}`;
+      if (keywordsArr.length > 0) {
+        params.unshift(`utm_term=${encodeForReadableQuery(keywordsArr.join(',+'))}`);
+      }
+
+      if (title) {
+        const insertAt = keywordsArr.length > 0 ? 1 : 0;
+        params.splice(insertAt, 0, `utm_content=${encodeForReadableQuery(title)}`);
+      }
+
+      if (tkid) {
+        let insertAt = 0;
+        if (keywordsArr.length > 0) insertAt += 1;
+        if (title) insertAt += 1;
+        params.splice(insertAt, 0, `tkid=${encodeForReadableQuery(tkid)}`);
+      }
+
+      params.push(`ppxid=${encodeForReadableQuery(ppxid)}`);
+
+      const url = `${base}${articlePath}?${params.join('&')}`;
 
       el('result').value = url;
       el('btnCopy').disabled = false;
@@ -385,11 +336,8 @@
     }
 
     function clearAll() {
-      ['articleUrl', 'title', 'tkid', 'agid', 'ppxid'].forEach(id => el(id).value = '');
-      for (let i = 1; i <= 6; i++) {
-        el('kw' + i).value = '';
-      }
-      ['errArticle','errKeywords','errTitle','errTkid','errAgid','errPpxid'].forEach(id => setErr(id, ''));
+      ['articleUrl', 'keywords', 'title', 'tkid', 'ppxid'].forEach(id => el(id).value = '');
+      ['errArticle','errKeywords','errTitle','errTkid','errPpxid'].forEach(id => setErr(id, ''));
       el('result').value = '（未生成）';
       el('btnCopy').disabled = true;
       setStatus('');
